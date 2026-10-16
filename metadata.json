@@ -1,0 +1,6 @@
+{
+  "name": "AURORA-01 | Autonomous Spacecraft Mission Control",
+  "description": "Next-generation mobile-first spacecraft monitoring and mission control station for AURORA-01.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

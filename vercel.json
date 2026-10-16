@@ -1,0 +1,39 @@
+{
+  "framework": "vite",
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "cleanUrls": true,
+  "rewrites": [
+    {
+      "source": "/aurora-01.apk",
+      "destination": "/aurora-01.apk"
+    },
+    {
+      "source": "/download/apk",
+      "destination": "/aurora-01.apk"
+    },
+    {
+      "source": "/api/(.*)",
+      "destination": "/api/$1"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/aurora-01.apk",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "application/vnd.android.package-archive"
+        },
+        {
+          "key": "Content-Disposition",
+          "value": "attachment; filename=\"aurora-01-ground-station.apk\""
+        }
+      ]
+    }
+  ]
+}

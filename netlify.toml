@@ -1,0 +1,14 @@
+[build]
+  publish = "dist"
+  command = "npm run build"
+
+[[headers]]
+  for = "/aurora-01.apk"
+  [headers.values]
+    Content-Type = "application/vnd.android.package-archive"
+    Content-Disposition = "attachment; filename=\"aurora-01-ground-station.apk\""
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

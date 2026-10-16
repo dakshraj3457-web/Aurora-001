@@ -1,0 +1,7 @@
+node_modules
+.git
+.aistudio
+android/build
+dist
+.env
+.DS_Store
