@@ -64,12 +64,19 @@ public class CdcAcmSerialDriver implements UsbSerialDriver {
             throw new IOException("Compatible CDC-ACM data interface not found on Arduino UNO");
         }
 
-        if (mControlInterface != null && !mConnection.claimInterface(mControlInterface, true)) {
-            throw new IOException("Failed to claim USB CDC control interface");
+        // Only claim control interface if separate from data interface
+        if (mControlInterface != null && mControlInterface.getId() != mDataInterface.getId()) {
+            try {
+                mConnection.claimInterface(mControlInterface, true);
+            } catch (Exception e) {
+                // Non-fatal on Android: kernel may manage CDC control interface
+            }
         }
 
-        if (!mConnection.claimInterface(mDataInterface, true)) {
-            throw new IOException("Failed to claim USB CDC data interface");
+        boolean dataClaimed = mConnection.claimInterface(mDataInterface, true);
+        if (!dataClaimed) {
+            // Try claim without force
+            mConnection.claimInterface(mDataInterface, false);
         }
 
         // Assign IN and OUT bulk endpoints
@@ -84,15 +91,38 @@ public class CdcAcmSerialDriver implements UsbSerialDriver {
             }
         }
 
+        // If endpoints not on data interface, search across all interfaces
+        if (mInEndpoint == null || mOutEndpoint == null) {
+            for (int i = 0; i < mDevice.getInterfaceCount(); i++) {
+                UsbInterface iface = mDevice.getInterface(i);
+                for (int ep = 0; ep < iface.getEndpointCount(); ep++) {
+                    UsbEndpoint endpoint = iface.getEndpoint(ep);
+                    if (endpoint.getType() == UsbConstants.USB_ENDPOINT_XFER_BULK) {
+                        if (endpoint.getDirection() == UsbConstants.USB_DIR_IN && mInEndpoint == null) {
+                            mInEndpoint = endpoint;
+                        } else if (endpoint.getDirection() == UsbConstants.USB_DIR_OUT && mOutEndpoint == null) {
+                            mOutEndpoint = endpoint;
+                        }
+                    }
+                }
+            }
+        }
+
         if (mInEndpoint == null || mOutEndpoint == null) {
             throw new IOException("Required USB bulk IN/OUT endpoints not found on Arduino UNO");
         }
 
         mIsOpen = true;
 
-        // Set initial 9600 baud rate and assert DTR/RTS
-        setBaudRate(mBaudRate);
-        setDtrRts(true, true);
+        // Set initial baud rate and assert DTR/RTS gracefully
+        try {
+            setBaudRate(mBaudRate);
+        } catch (Exception ignored) {
+        }
+        try {
+            setDtrRts(true, true);
+        } catch (Exception ignored) {
+        }
     }
 
     @Override

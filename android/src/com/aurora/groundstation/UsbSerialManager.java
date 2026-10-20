@@ -104,7 +104,12 @@ public class UsbSerialManager {
         filter.addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED);
         filter.addAction(UsbManager.ACTION_USB_DEVICE_DETACHED);
 
-        mContext.registerReceiver(mUsbReceiver, filter);
+        if (Build.VERSION.SDK_INT >= 33) {
+            // Android 13+ requires explicit receiver exported flag
+            mContext.registerReceiver(mUsbReceiver, filter, Context.RECEIVER_EXPORTED);
+        } else {
+            mContext.registerReceiver(mUsbReceiver, filter);
+        }
     }
 
     public void setEventListener(UsbEventListener listener) {
@@ -139,7 +144,7 @@ public class UsbSerialManager {
 
         HashMap<String, UsbDevice> deviceList = mUsbManager.getDeviceList();
         if (deviceList == null || deviceList.isEmpty()) {
-            setState("DISCONNECTED", null, "No USB devices detected. Connect Arduino UNO via USB OTG adapter.");
+            setState("DISCONNECTED", null, "No USB devices detected. Connect Arduino UNO via USB OTG adapter and verify OTG is enabled in Android Settings.");
             return;
         }
 
@@ -151,9 +156,15 @@ public class UsbSerialManager {
             }
         }
 
+        // If no strict Arduino signature matched, pick the first connected USB device
+        if (targetDevice == null && !deviceList.isEmpty()) {
+            targetDevice = deviceList.values().iterator().next();
+            logInfo("Connecting to attached USB device: " + getDeviceDisplayName(targetDevice));
+        }
+
         if (targetDevice != null) {
             String name = getDeviceDisplayName(targetDevice);
-            logInfo("Discovered Arduino UNO: " + name);
+            logInfo("Discovered target USB device: " + name);
             if (mUsbManager.hasPermission(targetDevice)) {
                 connectDevice(targetDevice, mBaudRate);
             } else {
@@ -161,7 +172,7 @@ public class UsbSerialManager {
                 requestPermission(targetDevice);
             }
         } else {
-            setState("DISCONNECTED", null, "Connected USB device is not recognized as Arduino UNO or supported serial chip");
+            setState("DISCONNECTED", null, "No compatible USB serial device found");
         }
     }
 
@@ -169,13 +180,37 @@ public class UsbSerialManager {
         if (device == null || mUsbManager == null) return;
         setState("PERMISSION REQUIRED", getDeviceDisplayName(device), null);
 
-        int flags = 0;
+        int flags = PendingIntent.FLAG_UPDATE_CURRENT;
         if (Build.VERSION.SDK_INT >= 31) {
-            flags = 0x02000000; // PendingIntent.FLAG_MUTABLE
+            flags |= PendingIntent.FLAG_MUTABLE;
         }
-        PendingIntent permissionIntent = PendingIntent.getBroadcast(
-                mContext, 0, new Intent(ACTION_USB_PERMISSION), flags);
+        Intent intent = new Intent(ACTION_USB_PERMISSION);
+        intent.setPackage(mContext.getPackageName());
+        PendingIntent permissionIntent = PendingIntent.getBroadcast(mContext, 0, intent, flags);
         mUsbManager.requestPermission(device, permissionIntent);
+    }
+
+    private UsbSerialDriver createDriver(UsbDevice device, UsbDeviceConnection connection) throws IOException {
+        int vid = device.getVendorId();
+        if (vid == 0x1A86) {
+            return new Ch340SerialDriver(device, connection);
+        } else if (vid == 0x0403) {
+            return new FtdiSerialDriver(device, connection);
+        } else if (vid == 0x10C4) {
+            return new Cp2102SerialDriver(device, connection);
+        }
+
+        // Check if device possesses CDC-ACM interface
+        for (int i = 0; i < device.getInterfaceCount(); i++) {
+            UsbInterface iface = device.getInterface(i);
+            if (iface.getInterfaceClass() == UsbConstants.USB_CLASS_COMM ||
+                iface.getInterfaceClass() == UsbConstants.USB_CLASS_CDC_DATA) {
+                return new CdcAcmSerialDriver(device, connection);
+            }
+        }
+
+        // Universal fallback for any USB device with bulk endpoints
+        return new UniversalSerialDriver(device, connection);
     }
 
     public synchronized void connectDevice(final UsbDevice device, final int baudRate) {
@@ -195,20 +230,22 @@ public class UsbSerialManager {
                     UsbDeviceConnection connection = mUsbManager.openDevice(device);
                     if (connection == null) {
                         postState("ERROR", getDeviceDisplayName(device),
-                                "Failed to open USB device. Ensure phone supports USB OTG and provides sufficient bus power.");
+                                "Failed to open USB device. Ensure phone supports USB OTG, toggle OTG in Android Settings, and grant permission.");
                         return;
                     }
 
                     UsbSerialDriver driver;
-                    if (device.getVendorId() == 0x1A86) {
-                        driver = new Ch340SerialDriver(device, connection);
-                    } else {
-                        // Standard Arduino UNO CDC-ACM
-                        driver = new CdcAcmSerialDriver(device, connection);
+                    try {
+                        driver = createDriver(device, connection);
+                        driver.setBaudRate(baudRate);
+                        driver.open();
+                    } catch (Exception primaryEx) {
+                        Log.w(TAG, "Primary driver failed (" + primaryEx.getMessage() + "), trying Universal fallback driver");
+                        driver = new UniversalSerialDriver(device, connection);
+                        driver.setBaudRate(baudRate);
+                        driver.open();
                     }
 
-                    driver.setBaudRate(baudRate);
-                    driver.open();
                     mCurrentDriver = driver;
 
                     postState("CONNECTED", getDeviceDisplayName(device), null);

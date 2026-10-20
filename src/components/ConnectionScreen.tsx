@@ -33,10 +33,12 @@ export const ConnectionScreen: React.FC = () => {
   const [isScanning, setIsScanning] = useState(false);
   const [hasNativeUsb, setHasNativeUsb] = useState(false);
   const [hasWebSerial, setHasWebSerial] = useState(false);
+  const [hasWebUsb, setHasWebUsb] = useState(false);
 
   useEffect(() => {
     setHasNativeUsb(typeof window !== 'undefined' && Boolean(window.AuroraUsb?.isNativeAvailable()));
     setHasWebSerial(typeof navigator !== 'undefined' && Boolean((navigator as any).serial));
+    setHasWebUsb(typeof navigator !== 'undefined' && Boolean((navigator as any).usb));
   }, []);
 
   const handleConnectUsb = async () => {
@@ -151,7 +153,13 @@ export const ConnectionScreen: React.FC = () => {
             <div className="flex items-center justify-between text-xs font-mono">
               <span className="text-slate-400">DEVICE DRIVER:</span>
               <span className="text-cyan-300">
-                {hasNativeUsb ? 'Native Android USB Host (UsbManager)' : hasWebSerial ? 'Web Serial API Driver' : 'Awaiting APK / Serial Driver'}
+                {hasNativeUsb
+                  ? 'Native Android USB Host (UsbManager)'
+                  : hasWebSerial
+                  ? 'Web Serial API Driver'
+                  : hasWebUsb
+                  ? 'WebUSB OTG Driver (Chrome Android)'
+                  : 'Web Sandbox (Install APK for Hardware OTG)'}
               </span>
             </div>
 
@@ -174,9 +182,37 @@ export const ConnectionScreen: React.FC = () => {
             </div>
 
             {telemetry.connectionError && (
-              <div className="p-3 rounded-lg bg-rose-950/40 border border-rose-500/40 flex items-start space-x-2 text-rose-300 text-xs">
-                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-rose-400" />
-                <span>{telemetry.connectionError}</span>
+              <div className="p-3.5 rounded-xl bg-rose-950/60 border border-rose-500/60 space-y-2 text-xs">
+                <div className="flex items-start space-x-2 text-rose-300 font-bold font-mono">
+                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-rose-400" />
+                  <span>CONNECTION ERROR: {telemetry.connectionError}</span>
+                </div>
+                <div className="text-[11px] font-sans text-rose-200/90 pl-6 space-y-1">
+                  <div>• <strong>Android OTG Toggle:</strong> On OnePlus, OPPO, Realme, and Xiaomi, go to <em>Settings &gt; System / Additional Settings</em> and toggle <strong>OTG Connection ON</strong>.</div>
+                  <div>• <strong>Cable Check:</strong> Verify the Arduino UNO's green power LED is lit and that the OTG adapter supports data transfer (not charge-only).</div>
+                  {!hasNativeUsb && (
+                    <div>• <strong>Install APK:</strong> Browsers restrict direct hardware USB OTG. Download the standalone APK below for native plug-and-play USB Host support.</div>
+                  )}
+                </div>
+                <div className="pt-2 pl-6 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      enterDemoMode();
+                      setActiveScreen('DASHBOARD');
+                    }}
+                    className="py-1.5 px-3 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-heading text-[11px] font-bold tracking-wider uppercase transition-colors"
+                  >
+                    GET DATA NOW (RUN SIMULATION)
+                  </button>
+                  <a
+                    href="/aurora-01.apk"
+                    download="aurora-01-ground-station.apk"
+                    className="py-1.5 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-cyan-300 font-mono text-[11px] border border-cyan-500/40 transition-colors"
+                  >
+                    DOWNLOAD ANDROID APK
+                  </a>
+                </div>
               </div>
             )}
           </div>
@@ -241,7 +277,7 @@ export const ConnectionScreen: React.FC = () => {
               className="w-full py-2.5 px-4 rounded-xl bg-slate-950/60 hover:bg-slate-900 border border-slate-800 text-cyan-400 hover:text-cyan-300 font-mono text-xs uppercase tracking-wider transition-all flex items-center justify-center space-x-2 cursor-pointer"
             >
               <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-              <span>LAUNCH SIMULATED DEMO (OFFLINE BENCHMARK)</span>
+              <span>TEST WITH LIVE TELEMETRY SIMULATION (GET DATA NOW)</span>
             </button>
           </div>
 

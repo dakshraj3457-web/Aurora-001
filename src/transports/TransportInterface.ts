@@ -4,7 +4,13 @@
 
 import { ParsedTelemetryPacket } from '../utils/telemetryParser';
 
-export type TransportStatus = 'DISCONNECTED' | 'CONNECTING' | 'CONNECTED' | 'ERROR';
+export type TransportStatus =
+  | 'DISCONNECTED'
+  | 'DEVICE FOUND'
+  | 'PERMISSION REQUIRED'
+  | 'CONNECTING'
+  | 'CONNECTED'
+  | 'ERROR';
 
 export interface TransportCallbacks {
   onStatusChange: (status: TransportStatus, errorMsg?: string) => void;

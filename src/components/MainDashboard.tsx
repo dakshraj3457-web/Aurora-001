@@ -14,13 +14,21 @@ import {
   AlertTriangle,
   Clock,
   Layers,
+  RefreshCw,
 } from 'lucide-react';
 import { useTelemetry } from '../context/TelemetryContext';
 import { MissionControls } from './MissionControls';
 import { SensorStatus } from '../types/telemetry';
 
 export const MainDashboard: React.FC = () => {
-  const { telemetry, history, setActiveScreen, baudRate } = useTelemetry();
+  const {
+    telemetry,
+    history,
+    setActiveScreen,
+    baudRate,
+    connectTransport,
+    enterDemoMode,
+  } = useTelemetry();
   const isConnected = telemetry.connection === 'CONNECTED';
 
   // Status badge helper
@@ -222,6 +230,54 @@ export const MainDashboard: React.FC = () => {
             <span>
               DATA STALE: No serial updates received in the last 3 seconds. Verify USB cable and Arduino UNO power.
             </span>
+          </div>
+        )}
+
+        {/* Offline / Error Recovery Banner */}
+        {!isConnected && (
+          <div className="mt-3 p-3 rounded-xl bg-slate-900/90 border border-cyan-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+            <div className="space-y-0.5">
+              <div className="flex items-center space-x-2">
+                <span className={`w-2 h-2 rounded-full ${telemetry.connection === 'ERROR' ? 'bg-rose-500 animate-pulse' : 'bg-amber-400'}`} />
+                <strong className={`font-mono ${telemetry.connection === 'ERROR' ? 'text-rose-400' : 'text-amber-300'}`}>
+                  USB OTG: {telemetry.connection}
+                </strong>
+                {telemetry.connectionError && (
+                  <span className="text-slate-400 font-sans truncate max-w-xs sm:max-w-md">
+                    — {telemetry.connectionError}
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] text-slate-400 font-sans">
+                Sensor gauges show '--' until serial packets arrive. You can connect physical hardware or start live simulated data.
+              </p>
+            </div>
+
+            <div className="flex items-center space-x-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => connectTransport('USB_SERIAL')}
+                className="py-1.5 px-3 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/40 text-cyan-300 font-mono text-[11px] flex items-center space-x-1 transition-colors"
+              >
+                <RefreshCw className="w-3 h-3 mr-1" />
+                <span>CONNECT USB</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => enterDemoMode()}
+                className="py-1.5 px-3 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-heading font-bold text-[11px] uppercase tracking-wider flex items-center space-x-1 shadow-lg shadow-emerald-500/20 transition-all"
+              >
+                <Sparkles className="w-3 h-3 mr-1" />
+                <span>GET DATA NOW</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveScreen('CONNECT')}
+                className="py-1.5 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono text-[11px] transition-colors"
+              >
+                SETUP GUIDE
+              </button>
+            </div>
           </div>
         )}
       </div>
