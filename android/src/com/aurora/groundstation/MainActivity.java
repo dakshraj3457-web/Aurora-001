@@ -18,6 +18,9 @@ import android.widget.FrameLayout;
 
 public class MainActivity extends Activity {
     private WebView webView;
+    private UsbSerialManager mUsbSerialManager;
+    private AuroraUsbBridge mUsbBridge;
+
     private static final String REMOTE_URL = "https://ais-pre-dpx4xsv3jlst4dzcbvqdx3-716293301337.asia-northeast1.run.app";
     private static final String LOCAL_URL = "file:///android_asset/index.html";
 
@@ -67,6 +70,11 @@ public class MainActivity extends Activity {
             settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
         }
 
+        // Initialize USB Host Serial Subsystem
+        mUsbSerialManager = new UsbSerialManager(this);
+        mUsbBridge = new AuroraUsbBridge(this, webView, mUsbSerialManager);
+        webView.addJavascriptInterface(mUsbBridge, "AuroraUsb");
+
         webView.setWebChromeClient(new WebChromeClient() {
             @Override
             public boolean onConsoleMessage(ConsoleMessage cm) {
@@ -90,7 +98,7 @@ public class MainActivity extends Activity {
             }
         });
 
-        // Initialize: if online, connect to live ground station server; otherwise launch bundled offline base
+        // Offline priority for direct USB hardware connection, remote if online
         if (isNetworkAvailable()) {
             webView.loadUrl(REMOTE_URL);
         } else {
@@ -121,11 +129,22 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         if (webView != null) webView.onResume();
+        if (mUsbSerialManager != null) {
+            mUsbSerialManager.scanAndAutoConnect();
+        }
     }
 
     @Override
     protected void onPause() {
         super.onPause();
         if (webView != null) webView.onPause();
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        if (mUsbSerialManager != null) {
+            mUsbSerialManager.destroy();
+        }
     }
 }

@@ -24,9 +24,20 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({
     );
   }
 
-  const values = data.map((d) => d[metric]);
-  const minVal = Math.min(...values);
-  const maxVal = Math.max(...values);
+  const numericValues = data
+    .map((d) => d[metric])
+    .filter((v): v is number => typeof v === 'number');
+
+  if (numericValues.length < 2) {
+    return (
+      <div className="h-28 flex items-center justify-center text-xs text-slate-500 font-mono">
+        WAITING FOR VALID SAMPLES...
+      </div>
+    );
+  }
+
+  const minVal = Math.min(...numericValues);
+  const maxVal = Math.max(...numericValues);
   const range = maxVal - minVal === 0 ? 1 : maxVal - minVal;
 
   const width = 280;
@@ -35,8 +46,8 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({
   const drawHeight = height - paddingY * 2;
 
   // Generate SVG path points
-  const points = values.map((val, idx) => {
-    const x = (idx / (values.length - 1)) * width;
+  const points = numericValues.map((val, idx) => {
+    const x = (idx / (numericValues.length - 1)) * width;
     const normalized = (val - minVal) / range;
     const y = height - paddingY - normalized * drawHeight;
     return `${x.toFixed(1)},${y.toFixed(1)}`;
@@ -45,7 +56,7 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({
   const linePath = `M ${points.join(' L ')}`;
   const areaPath = `${linePath} L ${width},${height} L 0,${height} Z`;
 
-  const currentVal = values[values.length - 1];
+  const currentVal = numericValues[numericValues.length - 1];
 
   return (
     <div className="bg-slate-900/40 rounded-lg p-3 border border-slate-800/80">

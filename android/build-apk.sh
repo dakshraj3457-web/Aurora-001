@@ -43,7 +43,7 @@ echo "=== [3/7] Compiling Java Source ==="
 javac -source 8 -target 8 \
   -bootclasspath "$ANDROID_JAR" \
   -d "$BUILD_DIR/classes" \
-  "$SRC_DIR/com/aurora/groundstation/MainActivity.java"
+  $SRC_DIR/com/aurora/groundstation/*.java
 
 echo "=== [4/7] Dexing Bytecode ==="
 "$DX_TOOL" --dex --output="$BUILD_DIR/classes.dex" "$BUILD_DIR/classes"

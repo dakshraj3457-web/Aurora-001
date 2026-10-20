@@ -1,30 +1,45 @@
 /**
- * Telemetry Parser for Arduino UNO Spacecraft Controller
- * Format specification:
- * DATA,light,distance,voltage,current,tilt,mode,alert
+ * Serial Protocol Parser for AURORA-01 Spacecraft
+ * Android USB OTG -> Arduino UNO
  *
+ * Incoming Telemetry Format: Newline-delimited JSON
  * Example:
- * DATA,850,42.5,7.82,410,3.2,NORMAL,NONE
+ * {"type":"telemetry","ldrLeft":420,"ldrCenter":510,"ldrRight":390,"distanceCm":32.5,"tiltX":2.4,"tiltY":-1.8,"servoAngle":90,"voltage":4.8,"currentMA":120,"hazard":false,"mode":"NORMAL"}
+ *
+ * Acknowledgements:
+ * {"type":"ack","command":"MODE:NORMAL","status":"OK"}
+ * {"type":"pong"}
+ * {"type":"hazard","message":"OBSTACLE_DETECTED"}
  */
 
-import type { MissionMode } from '../types/telemetry.ts';
+import type { MissionMode } from '../types/telemetry';
 
 export interface ParsedTelemetryPacket {
   isValid: boolean;
   rawPayload: string;
-  light?: number;       // LDR reading
-  distance?: number;    // HC-SR04 cm
-  voltage?: number;     // INA219 V
-  current?: number;     // INA219 mA
-  power?: number;       // Calculated Watts
-  tilt?: {
-    pitch: number;
-    roll: number;
-    yaw: number;
-  };
+  packetType: 'telemetry' | 'ack' | 'pong' | 'hazard' | 'raw_text' | 'unknown';
+  
+  // Telemetry fields (null if unavailable or not sent by Arduino)
+  ldrLeft?: number | null;
+  ldrCenter?: number | null;
+  ldrRight?: number | null;
+  light?: number | null;
+  distanceCm?: number | null;
+  voltage?: number | null;
+  currentMA?: number | null;
+  powerWatts?: number | null;
+  tiltX?: number | null;
+  tiltY?: number | null;
+  tiltZ?: number | null;
+  servoAngle?: number | null;
+  hazard?: boolean;
+  hazardMessage?: string;
   mode?: MissionMode;
-  alert?: string;
-  servoAngle?: number;
+  
+  // ACK fields
+  ackCommand?: string;
+  ackStatus?: string;
+  
   error?: string;
 }
 
@@ -33,125 +48,216 @@ const VALID_MODES: MissionMode[] = ['NORMAL', 'POWER_SAVE', 'SAFE_MODE', 'COURSE
 export function parseTelemetryLine(line: string): ParsedTelemetryPacket {
   const trimmed = line.trim();
   if (!trimmed) {
-    return { isValid: false, rawPayload: line, error: 'Empty payload' };
+    return {
+      isValid: false,
+      rawPayload: line,
+      packetType: 'unknown',
+      error: 'Empty serial payload',
+    };
   }
 
-  // Handle command ACK lines
+  // 1. Primary: JSON protocol
+  if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+    try {
+      const data = JSON.parse(trimmed);
+      const pType = data.type || (data.command ? 'ack' : 'telemetry');
+
+      if (pType === 'ack') {
+        return {
+          isValid: true,
+          rawPayload: trimmed,
+          packetType: 'ack',
+          ackCommand: typeof data.command === 'string' ? data.command : undefined,
+          ackStatus: typeof data.status === 'string' ? data.status : 'OK',
+        };
+      }
+
+      if (pType === 'pong') {
+        return {
+          isValid: true,
+          rawPayload: trimmed,
+          packetType: 'pong',
+        };
+      }
+
+      if (pType === 'hazard') {
+        return {
+          isValid: true,
+          rawPayload: trimmed,
+          packetType: 'hazard',
+          hazard: true,
+          hazardMessage: data.message || 'HAZARD_ALERT',
+        };
+      }
+
+      // Telemetry packet
+      const ldrLeft = Number.isFinite(data.ldrLeft) ? Math.max(0, data.ldrLeft) : null;
+      const ldrCenter = Number.isFinite(data.ldrCenter) ? Math.max(0, data.ldrCenter) : null;
+      const ldrRight = Number.isFinite(data.ldrRight) ? Math.max(0, data.ldrRight) : null;
+      
+      // Calculate consolidated light from 3 LDRs or explicit light field
+      let light: number | null = null;
+      if (Number.isFinite(data.light)) {
+        light = data.light;
+      } else if (ldrCenter !== null || ldrLeft !== null || ldrRight !== null) {
+        const available = [ldrLeft, ldrCenter, ldrRight].filter((v): v is number => v !== null);
+        light = available.length > 0 ? Math.round(available.reduce((a, b) => a + b, 0) / available.length) : null;
+      }
+
+      const distanceCm = Number.isFinite(data.distanceCm) ? Math.max(0, data.distanceCm) : (Number.isFinite(data.distance) ? data.distance : null);
+      const voltage = Number.isFinite(data.voltage) ? Math.max(0, data.voltage) : null;
+      const currentMA = Number.isFinite(data.currentMA) ? data.currentMA : (Number.isFinite(data.current) ? data.current : null);
+      
+      let powerWatts: number | null = null;
+      if (voltage !== null && currentMA !== null) {
+        powerWatts = Math.round(((voltage * currentMA) / 1000) * 100) / 100;
+      }
+
+      const tiltX = Number.isFinite(data.tiltX) ? data.tiltX : (data.tilt?.pitch ?? null);
+      const tiltY = Number.isFinite(data.tiltY) ? data.tiltY : (data.tilt?.roll ?? null);
+      const tiltZ = Number.isFinite(data.tiltZ) ? data.tiltZ : (data.tilt?.yaw ?? null);
+
+      let servoAngle: number | null = null;
+      if (Number.isFinite(data.servoAngle)) {
+        servoAngle = Math.min(180, Math.max(0, Math.round(data.servoAngle)));
+      }
+
+      let mode: MissionMode | undefined;
+      if (typeof data.mode === 'string') {
+        const normalized = data.mode.trim().toUpperCase().replace(/\s+/g, '_');
+        if (VALID_MODES.includes(normalized as MissionMode)) {
+          mode = normalized as MissionMode;
+        }
+      }
+
+      const hazard = Boolean(data.hazard);
+
+      return {
+        isValid: true,
+        rawPayload: trimmed,
+        packetType: 'telemetry',
+        ldrLeft,
+        ldrCenter,
+        ldrRight,
+        light,
+        distanceCm,
+        voltage,
+        currentMA,
+        powerWatts,
+        tiltX,
+        tiltY,
+        tiltZ,
+        servoAngle,
+        hazard,
+        mode,
+      };
+    } catch (jsonErr) {
+      return {
+        isValid: false,
+        rawPayload: trimmed,
+        packetType: 'unknown',
+        error: `JSON parse error: ${jsonErr instanceof Error ? jsonErr.message : 'Invalid JSON'}`,
+      };
+    }
+  }
+
+  // 2. Fallback: Text acknowledgements (e.g. "ACK:MODE:NORMAL" or "OK:SERVO:90")
   if (trimmed.startsWith('ACK:') || trimmed.startsWith('OK:')) {
+    const cmd = trimmed.substring(trimmed.indexOf(':') + 1).trim();
     return {
       isValid: true,
       rawPayload: trimmed,
-      alert: trimmed,
+      packetType: 'ack',
+      ackCommand: cmd,
+      ackStatus: 'OK',
     };
   }
 
-  // Support packets with or without 'DATA' prefix
-  let parts = trimmed.split(',');
-  if (parts[0] === 'DATA' || parts[0] === '$DATA') {
-    parts = parts.slice(1);
-  }
+  // 3. Fallback: Legacy comma-separated format DATA,light,dist,volt,curr,tilt,mode
+  if (trimmed.startsWith('DATA,') || trimmed.startsWith('$DATA,')) {
+    const parts = trimmed.split(',').slice(1);
+    if (parts.length >= 5) {
+      try {
+        const light = parseFloat(parts[0]);
+        const distanceCm = parseFloat(parts[1]);
+        const voltage = parseFloat(parts[2]);
+        const currentMA = parseFloat(parts[3]);
+        const powerWatts = (Number.isFinite(voltage) && Number.isFinite(currentMA))
+          ? Math.round(((voltage * currentMA) / 1000) * 100) / 100
+          : null;
+        const tiltX = parseFloat(parts[4]);
 
-  // Expected at least: light, distance, voltage, current, tilt, mode
-  if (parts.length < 5) {
-    return {
-      isValid: false,
-      rawPayload: line,
-      error: `Insufficient fields (found ${parts.length}, expected >= 5)`,
-    };
-  }
-
-  try {
-    // 1. Light (LDR)
-    const rawLight = parseFloat(parts[0]);
-    const light = Number.isFinite(rawLight) ? Math.max(0, rawLight) : undefined;
-
-    // 2. Distance (HC-SR04 cm)
-    const rawDistance = parseFloat(parts[1]);
-    const distance = Number.isFinite(rawDistance) ? Math.max(0, rawDistance) : undefined;
-
-    // 3. Voltage (INA219 V)
-    const rawVoltage = parseFloat(parts[2]);
-    const voltage = Number.isFinite(rawVoltage) ? Math.max(0, rawVoltage) : undefined;
-
-    // 4. Current (INA219 mA)
-    const rawCurrent = parseFloat(parts[3]);
-    const current = Number.isFinite(rawCurrent) ? rawCurrent : undefined;
-
-    // 5. Calculated Power in Watts
-    let power: number | undefined;
-    if (voltage !== undefined && current !== undefined) {
-      power = Math.round(((voltage * current) / 1000) * 100) / 100;
-    }
-
-    // 6. Tilt (MPU6050)
-    // Could be a single tilt angle or pitch:roll:yaw
-    let tiltObj = { pitch: 0, roll: 0, yaw: 0 };
-    if (parts[4]) {
-      const tiltParts = parts[4].split(':');
-      if (tiltParts.length >= 3) {
-        tiltObj = {
-          pitch: parseFloat(tiltParts[0]) || 0,
-          roll: parseFloat(tiltParts[1]) || 0,
-          yaw: parseFloat(tiltParts[2]) || 0,
+        return {
+          isValid: true,
+          rawPayload: trimmed,
+          packetType: 'telemetry',
+          light: Number.isFinite(light) ? light : null,
+          distanceCm: Number.isFinite(distanceCm) ? distanceCm : null,
+          voltage: Number.isFinite(voltage) ? voltage : null,
+          currentMA: Number.isFinite(currentMA) ? currentMA : null,
+          powerWatts,
+          tiltX: Number.isFinite(tiltX) ? tiltX : null,
+          mode: 'NORMAL',
         };
-      } else {
-        const singleAngle = parseFloat(parts[4]);
-        tiltObj = {
-          pitch: Number.isFinite(singleAngle) ? singleAngle : 0,
-          roll: 0,
-          yaw: 0,
-        };
+      } catch (e) {
+        // Fall through
       }
     }
-
-    // 7. Mode
-    let mode: MissionMode | undefined;
-    if (parts[5]) {
-      const rawMode = parts[5].trim().toUpperCase().replace(/\s+/g, '_');
-      const matched = VALID_MODES.find((m) => m === rawMode);
-      if (matched) {
-        mode = matched;
-      }
-    }
-
-    // 8. Alert
-    const alert = parts[6] ? parts[6].trim() : 'NONE';
-
-    // 9. Optional Servo angle
-    let servoAngle: number | undefined;
-    if (parts[7]) {
-      const rawAngle = parseFloat(parts[7]);
-      if (Number.isFinite(rawAngle)) {
-        servoAngle = Math.min(180, Math.max(0, rawAngle));
-      }
-    }
-
-    return {
-      isValid: true,
-      rawPayload: trimmed,
-      light,
-      distance,
-      voltage,
-      current,
-      power,
-      tilt: tiltObj,
-      mode,
-      alert,
-      servoAngle,
-    };
-  } catch (err) {
-    return {
-      isValid: false,
-      rawPayload: line,
-      error: err instanceof Error ? err.message : 'Parse error',
-    };
   }
+
+  // 4. Raw text message / non-JSON diagnostic line from Arduino
+  return {
+    isValid: true,
+    rawPayload: trimmed,
+    packetType: 'raw_text',
+    error: undefined,
+  };
 }
 
 /**
- * Formats command for Arduino transmission with trailing newline
+ * Validates and formats commands for Arduino transmission.
+ * Supported commands:
+ * - MODE:NORMAL
+ * - MODE:POWER_SAVE
+ * - MODE:SAFE
+ * - SERVO:<angle> (0-180)
+ * - PING
  */
-export function formatCommand(cmd: MissionMode | string): string {
-  const normalized = cmd.trim().toUpperCase().replace(/\s+/g, '_');
-  return `${normalized}\n`;
+export function validateAndFormatCommand(command: string): { valid: boolean; formatted: string; error?: string } {
+  const trimmed = command.trim();
+  if (!trimmed) {
+    return { valid: false, formatted: '', error: 'Command cannot be empty' };
+  }
+
+  // Ping command
+  if (trimmed.toUpperCase() === 'PING') {
+    return { valid: true, formatted: 'PING\n' };
+  }
+
+  // Mode commands
+  if (trimmed.toUpperCase().startsWith('MODE:')) {
+    const mode = trimmed.substring(5).trim().toUpperCase();
+    if (['NORMAL', 'POWER_SAVE', 'SAFE', 'SAFE_MODE'].includes(mode)) {
+      const canonicalMode = mode === 'SAFE_MODE' ? 'SAFE' : mode;
+      return { valid: true, formatted: `MODE:${canonicalMode}\n` };
+    }
+    return { valid: false, formatted: '', error: `Invalid mode '${mode}'. Allowed: NORMAL, POWER_SAVE, SAFE` };
+  }
+
+  // Servo command
+  if (trimmed.toUpperCase().startsWith('SERVO:')) {
+    const angleStr = trimmed.substring(6).trim();
+    const angle = parseInt(angleStr, 10);
+    if (isNaN(angle) || angle < 0 || angle > 180) {
+      return { valid: false, formatted: '', error: `Invalid servo angle '${angleStr}'. Must be an integer between 0 and 180 degrees.` };
+    }
+    return { valid: true, formatted: `SERVO:${angle}\n` };
+  }
+
+  // General alphanumeric command validation
+  if (/^[A-Za-z0-9_:]+$/.test(trimmed)) {
+    return { valid: true, formatted: `${trimmed}\n` };
+  }
+
+  return { valid: false, formatted: '', error: 'Command contains invalid characters' };
 }

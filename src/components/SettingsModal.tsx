@@ -27,8 +27,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const {
     thresholds,
     setThresholds,
-    esp32Url,
-    setEsp32Url,
+    baudRate,
+    setBaudRate,
     deviceName,
     setDeviceName,
     telemetry,
@@ -38,7 +38,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
 
   const [activeTab, setActiveTab] = useState<'THRESHOLDS' | 'COMM' | 'WIRING' | 'ABOUT'>('THRESHOLDS');
   const [localThresholds, setLocalThresholds] = useState(thresholds);
-  const [localUrl, setLocalUrl] = useState(esp32Url);
+  const [localBaud, setLocalBaud] = useState(baudRate);
   const [localName, setLocalName] = useState(deviceName);
 
   if (!isOpen) return null;
@@ -46,7 +46,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const handleSave = () => {
     soundManager.playBeep(1200, 0.08, 'triangle');
     setThresholds(localThresholds);
-    setEsp32Url(localUrl);
+    setBaudRate(localBaud);
     setDeviceName(localName);
     onClose();
   };
@@ -69,10 +69,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
       appVersion: '2.4.0',
       telemetry,
       thresholds: localThresholds,
-      esp32Url: localUrl,
+      baudRate: localBaud,
       capabilities: {
-        bluetooth: typeof navigator !== 'undefined' && Boolean((navigator as any).bluetooth),
-        serial: typeof navigator !== 'undefined' && Boolean((navigator as any).serial),
+        webSerial: typeof navigator !== 'undefined' && Boolean((navigator as any).serial),
+        webUsb: typeof navigator !== 'undefined' && Boolean((navigator as any).usb),
+        androidBridge: typeof window !== 'undefined' && Boolean((window as any).AndroidUsbSerial),
       },
     };
     const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(report, null, 2));
@@ -239,7 +240,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
           {activeTab === 'COMM' && (
             <div className="space-y-4">
               <div>
-                <label className="text-slate-300 block mb-1">SPACECRAFT CALLSIGN / NAME:</label>
+                <label className="text-slate-300 block mb-1">SPACECRAFT CALLSIGN / TARGET:</label>
                 <input
                   type="text"
                   value={localName}
@@ -249,17 +250,29 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
               </div>
 
               <div>
-                <label className="text-slate-300 block mb-1">ESP32-S3 WI-FI SERVER ENDPOINT:</label>
-                <input
-                  type="text"
-                  value={localUrl}
-                  onChange={(e) => setLocalUrl(e.target.value)}
-                  placeholder="http://192.168.4.1"
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-slate-100"
-                />
+                <label className="text-slate-300 block mb-1">USB SERIAL BAUD RATE:</label>
+                <select
+                  value={localBaud}
+                  onChange={(e) => setLocalBaud(parseInt(e.target.value, 10))}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 font-mono"
+                >
+                  <option value={9600}>9600 Baud (Default / Recommended for UNO)</option>
+                  <option value={19200}>19200 Baud</option>
+                  <option value={38400}>38400 Baud</option>
+                  <option value={57600}>57600 Baud</option>
+                  <option value={115200}>115200 Baud (High Speed)</option>
+                </select>
                 <span className="text-[10px] text-slate-500 mt-1 block font-sans">
-                  Used for polling telemetry and acquiring OV7670 event photos over HTTP.
+                  Must match Serial.begin(baudRate) in the Arduino UNO C++ firmware sketch.
                 </span>
+              </div>
+
+              <div className="p-3 bg-slate-900/60 rounded-xl border border-slate-800 space-y-1.5 font-mono text-[11px]">
+                <div className="text-cyan-400 font-bold">PHYSICAL CABLE ARCHITECTURE</div>
+                <div className="text-slate-300">• Hardware Link: Phone USB OTG &rarr; USB-A to USB-B Cable &rarr; Arduino UNO</div>
+                <div className="text-slate-300">• Flow Control: DTR / RTS asserted for clean Arduino reboot sync</div>
+                <div className="text-slate-300">• Protocol Framing: Newline-delimited JSON (`\n`)</div>
+                <div className="text-slate-300">• Offline Guarantee: 100% offline local serial bus, zero cloud/internet latency</div>
               </div>
             </div>
           )}
@@ -275,10 +288,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                   <div>• MPU6050 SCL: Pin A5 (I2C 0x68)</div>
                   <div>• HC-SR04 Trig: Digital Pin 9</div>
                   <div>• HC-SR04 Echo: Digital Pin 10</div>
-                  <div>• LDR Sensor: Analog Pin A0</div>
+                  <div>• LDR Sensor (Left): Analog Pin A0</div>
+                  <div>• LDR Sensor (Center): Analog Pin A1</div>
+                  <div>• LDR Sensor (Right): Analog Pin A2</div>
                   <div>• SG90 Servo PWM: Digital Pin 3</div>
-                  <div>• HC-05 RX/TX: Pins 10/11 (SoftSerial)</div>
-                  <div>• ESP32-S3 Camera: Dedicated AP Wi-Fi</div>
+                  <div>• USB Telemetry: USB-B port (Hardware Serial 0/1)</div>
+                  <div>• Power Bus: External 5V/Battery (Do not power servos from phone)</div>
                 </div>
               </div>
             </div>

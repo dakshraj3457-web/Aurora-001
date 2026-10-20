@@ -1,12 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.aurora.groundstation"
-    android:versionCode="1"
-    android:versionName="2.4.0">
+    android:versionCode="2"
+    android:versionName="2.5.0">
 
     <uses-sdk
         android:minSdkVersion="21"
         android:targetSdkVersion="33" />
+
+    <!-- Hardware permissions: USB Host for Arduino UNO OTG communication -->
+    <uses-feature
+        android:name="android.hardware.usb.host"
+        android:required="false" />
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
@@ -27,6 +32,14 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+
+            <!-- USB Device Attached Intent Filter -->
+            <intent-filter>
+                <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />
+            </intent-filter>
+            <meta-data
+                android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED"
+                android:resource="@xml/device_filter" />
         </activity>
     </application>
 </manifest>

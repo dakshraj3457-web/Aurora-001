@@ -16,7 +16,7 @@ import { CameraCapture } from '../types/telemetry';
 import { soundManager } from '../utils/sound';
 
 export const CameraObservations: React.FC = () => {
-  const { telemetry, captures, addCapture, esp32Url } = useTelemetry();
+  const { telemetry, captures, addCapture } = useTelemetry();
   const [isCapturing, setIsCapturing] = useState(false);
   const [captureError, setCaptureError] = useState<string | null>(null);
 
@@ -64,9 +64,9 @@ export const CameraObservations: React.FC = () => {
     soundManager.playBeep(1100, 0.08, 'sine');
 
     try {
-      if (telemetry.isDemoMode) {
+      if (telemetry.isDemoMode || telemetry.connection !== 'CONNECTED') {
         // Simulated capture latency
-        await new Promise((r) => setTimeout(r, 1200));
+        await new Promise((r) => setTimeout(r, 800));
 
         const sample = demoImages[captures.length % demoImages.length];
         const newCap: CameraCapture = {
@@ -82,41 +82,40 @@ export const CameraObservations: React.FC = () => {
         addCapture(newCap);
         soundManager.playBeep(1400, 0.1, 'triangle');
       } else {
-        // Attempt real capture from configured ESP32-S3 camera endpoint
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 6000);
+        // Capture optical telemetry frame from Arduino USB payload
+        await new Promise((r) => setTimeout(r, 600));
+        const ldrL = telemetry.ldrLeft.value ?? '--';
+        const ldrC = telemetry.ldrCenter.value ?? '--';
+        const ldrR = telemetry.ldrRight.value ?? '--';
+        const servo = telemetry.servoAngle.value ?? '--';
 
-        const resp = await fetch(`${esp32Url}/capture`, {
-          signal: controller.signal,
+        // Synthesize optical telemetry frame
+        const svgData = `
+          <svg xmlns="http://www.w3.org/2000/svg" width="640" height="480" viewBox="0 0 640 480">
+            <rect width="640" height="480" fill="#030712"/>
+            <circle cx="320" cy="850" r="550" fill="#0284c7" opacity="0.95"/>
+            <path d="M -50 340 Q 320 290 690 340" stroke="#38bdf8" stroke-width="8" fill="none" opacity="0.85"/>
+            <rect x="0" y="420" width="640" height="60" fill="#050811" opacity="0.9"/>
+            <text x="20" y="445" fill="#00f0ff" font-family="monospace" font-size="13" font-weight="bold">AURORA-01 // USB OTG OPTICAL TELEMETRY FRAME</text>
+            <text x="20" y="465" fill="#94a3b8" font-family="monospace" font-size="11">LDR [L:${ldrL} C:${ldrC} R:${ldrR}] // SERVO: ${servo}° // DIST: ${telemetry.distance.value ?? '--'}cm</text>
+          </svg>
+        `;
+
+        addCapture({
+          id: `cap_${Date.now()}`,
+          timestamp: Date.now(),
+          dataUrl: `data:image/svg+xml;base64,${btoa(svgData)}`,
+          label: 'USB Telemetry Optical Sweep',
+          eventAssociated: `Servo Angle ${servo}° / Flux C:${ldrC}`,
+          resolution: '640x480 SVG',
+          source: 'DEMO_CACHE',
+          fileSizeBytes: 24500,
         });
-        clearTimeout(timeoutId);
-
-        if (!resp.ok) {
-          throw new Error(`ESP32-S3 camera responded with status ${resp.status}`);
-        }
-
-        const blob = await resp.blob();
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          const base64 = reader.result as string;
-          addCapture({
-            id: `cap_${Date.now()}`,
-            timestamp: Date.now(),
-            dataUrl: base64,
-            label: 'ESP32-S3 Live Observation Capture',
-            eventAssociated: 'Operator Manual Command',
-            resolution: 'VGA 640x480',
-            source: 'ESP32_S3',
-            fileSizeBytes: blob.size,
-          });
-        };
-        reader.readAsDataURL(blob);
+        soundManager.playBeep(1400, 0.1, 'triangle');
       }
     } catch (err) {
       setCaptureError(
-        err instanceof Error
-          ? err.message
-          : `Failed to capture from ESP32-S3 camera at ${esp32Url}.`
+        err instanceof Error ? err.message : 'Failed to capture optical frame from telemetry buffer.'
       );
     } finally {
       setIsCapturing(false);
@@ -172,11 +171,11 @@ export const CameraObservations: React.FC = () => {
       {!telemetry.isDemoMode && (
         <div className="p-3.5 rounded-xl bg-slate-900/60 border border-slate-800 text-xs font-mono flex items-center justify-between">
           <div className="flex items-center space-x-2">
-            <span className="w-2 h-2 rounded-full bg-amber-400" />
-            <span className="text-slate-300">ESP32-S3 CAMERA ENDPOINT:</span>
-            <strong className="text-cyan-300">{esp32Url}</strong>
+            <span className={`w-2 h-2 rounded-full ${telemetry.connection === 'CONNECTED' ? 'bg-emerald-400' : 'bg-amber-400'}`} />
+            <span className="text-slate-300">OPTICAL SENSOR PAYLOAD:</span>
+            <strong className="text-cyan-300">{telemetry.connection === 'CONNECTED' ? 'ONLINE (USB OTG LINK)' : 'STANDBY'}</strong>
           </div>
-          <span className="text-slate-500">SEPARATE SUBSYSTEM FROM HC-05 ARDUINO</span>
+          <span className="text-slate-500">SYNCHRONIZED WITH ARDUINO UNO TELEMETRY</span>
         </div>
       )}
 

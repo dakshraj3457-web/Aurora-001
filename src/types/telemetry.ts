@@ -1,13 +1,20 @@
 /**
  * AURORA-01 Autonomous Spacecraft Mission Control
  * Core Telemetry and Subsystem Data Types
+ * Physical USB OTG Cable -> Arduino UNO Architecture
  */
 
 export type MissionMode = 'NORMAL' | 'POWER_SAVE' | 'SAFE_MODE' | 'COURSE_CHANGE' | 'RESUME';
 
-export type ConnectionState = 'DISCONNECTED' | 'CONNECTING' | 'CONNECTED' | 'ERROR';
+export type ConnectionState =
+  | 'DISCONNECTED'
+  | 'DEVICE FOUND'
+  | 'PERMISSION REQUIRED'
+  | 'CONNECTING'
+  | 'CONNECTED'
+  | 'ERROR';
 
-export type TransportType = 'BLE' | 'BLUETOOTH_SERIAL' | 'WIFI' | 'DEMO';
+export type TransportType = 'USB_SERIAL' | 'DEMO';
 
 export type SensorStatus = 'HEALTHY' | 'WARNING' | 'FAULT' | 'UNAVAILABLE';
 
@@ -20,37 +27,11 @@ export interface TelemetryAlert {
 
 export interface TelemetryHistoryPoint {
   time: string;
-  voltage: number;
-  current: number;
-  light: number;
-  tilt: number;
-  distance: number;
-}
-
-export interface TelemetryData {
-  connection: ConnectionState;
-  mode: MissionMode;
-  light: number;
-  distance: number;
-  distanceUnit: 'cm' | 'km';
-  voltage: number;
-  current: number;
-  tilt: {
-    pitch: number;
-    roll: number;
-    yaw: number;
-  };
-  latestAlert: string;
-  timestamp: number;
-  batteryLevel: number;
-  powerWatts: number;
-  temperature: number;
-  signalDbm: number;
-  packetRate: number;
-  missionElapsedSeconds: number;
-  orbitAltitudeKm: number;
-  solarPanelStatus: 'DEPLOYED' | 'STOWED' | 'DEPLOYING';
-  reactionWheelsRpm: number;
+  voltage: number | null;
+  current: number | null;
+  light: number | null;
+  tilt: number | null;
+  distance: number | null;
 }
 
 export interface SensorReading<T = number> {
@@ -60,45 +41,63 @@ export interface SensorReading<T = number> {
   lastUpdated: number;
   label: string;
   sensorModel: string;
+  rawString?: string;
 }
 
 export interface OrientationData {
-  pitch: number; // degrees
-  roll: number;  // degrees
-  yaw: number;   // degrees
-  accelX?: number;
-  accelY?: number;
-  accelZ?: number;
+  pitch: number; // degrees (tiltX)
+  roll: number;  // degrees (tiltY)
+  yaw: number;   // degrees (tiltZ)
+}
+
+export interface PendingCommand {
+  id: string;
+  command: string;
+  sentTimestamp: number;
+  status: 'SENDING' | 'SENT' | 'ACKED' | 'TIMEOUT' | 'REJECTED';
+  ackStatus?: string;
 }
 
 export interface TelemetryState {
-  // Connection and identity
+  // Connection and identity (USB OTG only)
   connection: ConnectionState;
+  connectionError?: string | null;
   transportType: TransportType;
   isDemoMode: boolean;
   deviceName: string;
+  baudRate: number;
   lastHeard: number | null;
-  rssi: number; // dBm
+  lastValidTelemetryTimestamp: number | null;
+  isStale: boolean;
   packetRate: number; // Hz
   totalPacketsReceived: number;
+  parseErrorCount: number;
 
   // Spacecraft operational mode
   mode: MissionMode;
   modePending: boolean;
   pendingModeTarget?: MissionMode;
 
-  // Real sensor readings (Arduino UNO + ESP32-S3 hardware)
-  light: SensorReading<number>;        // LDR
-  distance: SensorReading<number>;     // HC-SR04 (cm)
-  voltage: SensorReading<number>;      // INA219 (V)
-  current: SensorReading<number>;      // INA219 (mA)
-  power: SensorReading<number>;        // Calculated (W) = (V * mA) / 1000
-  tilt: SensorReading<OrientationData>;// MPU6050
-  servoAngle: SensorReading<number>;   // Servo position (0-180°)
-  cameraStatus: SensorReading<string>; // ESP32-S3 OV7670
-  
-  // Mission telemetry metrics
-  healthScore: number;                 // 0 - 100%
+  // Real sensor readings received from Arduino UNO
+  ldrLeft: SensorReading<number | null>;     // LDR Left
+  ldrCenter: SensorReading<number | null>;   // LDR Center
+  ldrRight: SensorReading<number | null>;    // LDR Right
+  light: SensorReading<number | null>;       // Consolidated Light
+  distance: SensorReading<number | null>;    // HC-SR04 (cm)
+  voltage: SensorReading<number | null>;     // INA219 (V)
+  current: SensorReading<number | null>;     // INA219 (mA)
+  power: SensorReading<number | null>;       // Calculated (W) = (V * mA) / 1000
+  tilt: SensorReading<OrientationData>;      // MPU6050 6-DoF
+  servoAngle: SensorReading<number | null>;  // SG90 position (0-180°)
+  hazard: boolean;                           // Spacecraft hazard flag
+  hazardMessage?: string;
+  cameraStatus: SensorReading<string>;
+
+  // Pending command queue and acknowledgements
+  pendingCommands: PendingCommand[];
+
+  // Mission telemetry health metrics
+  healthScore: number;                       // 0 - 100%
   overallStatus: 'NOMINAL' | 'ADVISORY' | 'WARNING' | 'CRITICAL';
   latestAlert: string;
   uptimeSeconds: number;
@@ -109,9 +108,9 @@ export interface AnomalyThresholds {
   maxVoltage: number;        // Volts (default: 8.4V)
   maxCurrent: number;        // mA (default: 800mA)
   maxTilt: number;           // degrees (default: 35°)
-  minDistance: number;       // cm (default: 10cm)
+  minDistance: number;       // cm (default: 15cm)
   minLight: number;          // Lux / ADC raw (default: 50)
-  staleTelemetryTimeout: number; // ms without packet (default: 3500ms)
+  staleTelemetryTimeout: number; // ms without packet (default: 3000ms)
 }
 
 export interface AnomalyEvent {
@@ -145,6 +144,7 @@ export interface MissionLogEntry {
   severity: 'INFO' | 'WARN' | 'CRITICAL';
   message: string;
   details?: string;
+  source: 'ARDUINO' | 'APP';
   isDemo: boolean;
 }
 

@@ -51,12 +51,12 @@ function AppContent() {
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-1.5">
           <div className="flex items-center space-x-2">
             <span className="w-2 h-2 rounded-full bg-emerald-400" />
-            <span className="text-cyan-400 font-semibold">AURORA-01 FLIGHT OPERATIONS</span>
+            <span className="text-cyan-400 font-semibold">AURORA-01 GROUND STATION</span>
             <span className="text-slate-700">|</span>
-            <span>UHF CARRIER 437.450 MHz</span>
+            <span>USB OTG SERIAL LINK (OFFLINE)</span>
           </div>
           <div className="flex items-center space-x-3 text-slate-400">
-            <span>ARDUINO UNO + ESP32-S3 SUBSYSTEMS</span>
+            <span>ARDUINO UNO ATMEGA328P</span>
             <span className="text-slate-700">|</span>
             <span>AURORA OS v2.4.0</span>
           </div>

@@ -1,75 +1,103 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseTelemetryLine, formatCommand } from './telemetryParser.ts';
+import { parseTelemetryLine, validateAndFormatCommand } from './telemetryParser.ts';
 import { evaluateAnomalies, calculateSpacecraftHealth, DEFAULT_THRESHOLDS } from './anomalyDetector.ts';
 import type { TelemetryState } from '../types/telemetry.ts';
 
-test('parseTelemetryLine parses standard Arduino DATA line', () => {
-  const line = 'DATA,850,42.5,7.82,410,3.2,NORMAL,NONE';
-  const res = parseTelemetryLine(line);
+test('parseTelemetryLine correctly parses newline JSON telemetry format', () => {
+  const jsonPacket = '{"type":"telemetry","ldrLeft":420,"ldrCenter":510,"ldrRight":390,"distanceCm":32.5,"tiltX":2.4,"tiltY":-1.8,"servoAngle":90,"voltage":4.8,"currentMA":120,"hazard":false,"mode":"NORMAL"}';
+  const res = parseTelemetryLine(jsonPacket);
 
   assert.equal(res.isValid, true);
-  assert.equal(res.light, 850);
-  assert.equal(res.distance, 42.5);
-  assert.equal(res.voltage, 7.82);
-  assert.equal(res.current, 410);
-  assert.equal(res.power, 3.21); // (7.82 * 410) / 1000 = 3.2062 -> 3.21
+  assert.equal(res.packetType, 'telemetry');
+  assert.equal(res.ldrLeft, 420);
+  assert.equal(res.ldrCenter, 510);
+  assert.equal(res.ldrRight, 390);
+  assert.equal(res.distanceCm, 32.5);
+  assert.equal(res.tiltX, 2.4);
+  assert.equal(res.tiltY, -1.8);
+  assert.equal(res.servoAngle, 90);
+  assert.equal(res.voltage, 4.8);
+  assert.equal(res.currentMA, 120);
+  assert.equal(res.powerWatts, 0.58); // (4.8 * 120) / 1000 = 0.576 -> 0.58
+  assert.equal(res.hazard, false);
   assert.equal(res.mode, 'NORMAL');
-  assert.equal(res.alert, 'NONE');
-  assert.equal(res.tilt?.pitch, 3.2);
 });
 
-test('parseTelemetryLine handles 3-axis tilt format', () => {
-  const line = 'DATA,1200,15.0,7.40,250,5.1:-2.3:45.0,SAFE_MODE,BATTERY_LOW';
-  const res = parseTelemetryLine(line);
+test('parseTelemetryLine handles acknowledgement and hazard packets', () => {
+  const ack = parseTelemetryLine('{"type":"ack","command":"MODE:NORMAL","status":"OK"}');
+  assert.equal(ack.isValid, true);
+  assert.equal(ack.packetType, 'ack');
+  assert.equal(ack.ackCommand, 'MODE:NORMAL');
 
-  assert.equal(res.isValid, true);
-  assert.equal(res.tilt?.pitch, 5.1);
-  assert.equal(res.tilt?.roll, -2.3);
-  assert.equal(res.tilt?.yaw, 45.0);
-  assert.equal(res.mode, 'SAFE_MODE');
-  assert.equal(res.alert, 'BATTERY_LOW');
+  const hazard = parseTelemetryLine('{"type":"hazard","message":"OBSTACLE_DETECTED"}');
+  assert.equal(hazard.isValid, true);
+  assert.equal(hazard.packetType, 'hazard');
+  assert.equal(hazard.hazard, true);
+  assert.equal(hazard.hazardMessage, 'OBSTACLE_DETECTED');
+
+  const textAck = parseTelemetryLine('ACK:MODE:SAFE');
+  assert.equal(textAck.isValid, true);
+  assert.equal(textAck.packetType, 'ack');
+  assert.equal(textAck.ackCommand, 'MODE:SAFE');
 });
 
-test('parseTelemetryLine handles ACK command lines', () => {
-  const res = parseTelemetryLine('ACK:MODE_CHANGED_NORMAL');
-  assert.equal(res.isValid, true);
-  assert.equal(res.alert, 'ACK:MODE_CHANGED_NORMAL');
+test('validateAndFormatCommand verifies command syntax and servo bounds', () => {
+  const ping = validateAndFormatCommand('PING');
+  assert.equal(ping.valid, true);
+  assert.equal(ping.formatted, 'PING\n');
+
+  const mode = validateAndFormatCommand('MODE:NORMAL');
+  assert.equal(mode.valid, true);
+  assert.equal(mode.formatted, 'MODE:NORMAL\n');
+
+  const servoValid = validateAndFormatCommand('SERVO:90');
+  assert.equal(servoValid.valid, true);
+  assert.equal(servoValid.formatted, 'SERVO:90\n');
+
+  const servoInvalidLow = validateAndFormatCommand('SERVO:-10');
+  assert.equal(servoInvalidLow.valid, false);
+
+  const servoInvalidHigh = validateAndFormatCommand('SERVO:250');
+  assert.equal(servoInvalidHigh.valid, false);
 });
 
-test('formatCommand adds newline for serial transmission', () => {
-  assert.equal(formatCommand('NORMAL'), 'NORMAL\n');
-  assert.equal(formatCommand('SAFE MODE'), 'SAFE_MODE\n');
-  assert.equal(formatCommand('COURSE_CHANGE'), 'COURSE_CHANGE\n');
-});
-
-test('evaluateAnomalies catches low voltage and proximity obstacles', () => {
+test('evaluateAnomalies catches low bus voltage and proximity hazard', () => {
+  const now = Date.now();
   const mockTelemetry: TelemetryState = {
     connection: 'CONNECTED',
-    transportType: 'DEMO',
-    isDemoMode: true,
-    deviceName: 'AURORA-01',
-    lastHeard: Date.now(),
-    rssi: -65,
-    packetRate: 10,
-    totalPacketsReceived: 100,
+    transportType: 'USB_SERIAL',
+    isDemoMode: false,
+    deviceName: 'Arduino UNO (USB OTG)',
+    baudRate: 9600,
+    lastHeard: now,
+    lastValidTelemetryTimestamp: now,
+    isStale: false,
+    packetRate: 5,
+    totalPacketsReceived: 50,
+    parseErrorCount: 0,
     mode: 'NORMAL',
     modePending: false,
-    light: { value: 600, unit: 'Lux', status: 'HEALTHY', lastUpdated: Date.now(), label: 'Light', sensorModel: 'LDR' },
-    distance: { value: 4.2, unit: 'cm', status: 'WARNING', lastUpdated: Date.now(), label: 'Distance', sensorModel: 'HC-SR04' },
-    voltage: { value: 6.1, unit: 'V', status: 'FAULT', lastUpdated: Date.now(), label: 'Bus Voltage', sensorModel: 'INA219' },
-    current: { value: 350, unit: 'mA', status: 'HEALTHY', lastUpdated: Date.now(), label: 'Current', sensorModel: 'INA219' },
-    power: { value: 2.14, unit: 'W', status: 'HEALTHY', lastUpdated: Date.now(), label: 'Power', sensorModel: 'INA219' },
-    tilt: { value: { pitch: 1.0, roll: 0.5, yaw: 0 }, unit: '°', status: 'HEALTHY', lastUpdated: Date.now(), label: 'Attitude', sensorModel: 'MPU6050' },
-    servoAngle: { value: 90, unit: '°', status: 'HEALTHY', lastUpdated: Date.now(), label: 'Solar Servo', sensorModel: 'SG90' },
-    cameraStatus: { value: 'STANDBY', unit: 'status', status: 'HEALTHY', lastUpdated: Date.now(), label: 'Camera', sensorModel: 'OV7670' },
-    healthScore: 65,
+    ldrLeft: { value: 420, unit: 'ADC', status: 'HEALTHY', lastUpdated: now, label: 'LDR Left', sensorModel: 'LDR' },
+    ldrCenter: { value: 510, unit: 'ADC', status: 'HEALTHY', lastUpdated: now, label: 'LDR Center', sensorModel: 'LDR' },
+    ldrRight: { value: 390, unit: 'ADC', status: 'HEALTHY', lastUpdated: now, label: 'LDR Right', sensorModel: 'LDR' },
+    light: { value: 440, unit: 'Lux', status: 'HEALTHY', lastUpdated: now, label: 'Light', sensorModel: 'LDR' },
+    distance: { value: 5.0, unit: 'cm', status: 'WARNING', lastUpdated: now, label: 'Distance', sensorModel: 'HC-SR04' },
+    voltage: { value: 6.1, unit: 'V', status: 'FAULT', lastUpdated: now, label: 'Bus Voltage', sensorModel: 'INA219' },
+    current: { value: 350, unit: 'mA', status: 'HEALTHY', lastUpdated: now, label: 'Current', sensorModel: 'INA219' },
+    power: { value: 2.14, unit: 'W', status: 'HEALTHY', lastUpdated: now, label: 'Power', sensorModel: 'INA219' },
+    tilt: { value: { pitch: 1.0, roll: 0.5, yaw: 0 }, unit: '°', status: 'HEALTHY', lastUpdated: now, label: 'Attitude', sensorModel: 'MPU6050' },
+    servoAngle: { value: 90, unit: '°', status: 'HEALTHY', lastUpdated: now, label: 'Solar Servo', sensorModel: 'SG90' },
+    hazard: false,
+    cameraStatus: { value: 'STANDBY', unit: 'status', status: 'HEALTHY', lastUpdated: now, label: 'Camera', sensorModel: 'OV7670' },
+    pendingCommands: [],
+    healthScore: 70,
     overallStatus: 'WARNING',
     latestAlert: 'NONE',
-    uptimeSeconds: 120,
+    uptimeSeconds: 60,
   };
 
-  const anomalies = evaluateAnomalies(mockTelemetry, DEFAULT_THRESHOLDS);
+  const anomalies = evaluateAnomalies(mockTelemetry, DEFAULT_THRESHOLDS, now);
   assert.ok(anomalies.some((a) => a.title.includes('Low Bus Voltage')));
   assert.ok(anomalies.some((a) => a.title.includes('Proximity Warning')));
 

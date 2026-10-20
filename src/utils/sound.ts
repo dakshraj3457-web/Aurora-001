@@ -121,6 +121,10 @@ class SoundController {
     } catch {}
   }
 
+  public playAlarm() {
+    this.playAlert();
+  }
+
   public playThruster() {
     if (this.muted) return;
     try {

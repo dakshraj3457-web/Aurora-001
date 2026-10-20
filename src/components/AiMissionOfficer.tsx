@@ -123,17 +123,17 @@ export const AiMissionOfficer: React.FC = () => {
     const modeTag = state.isDemoMode ? '[DEMO TELEMETRY]' : '[REAL HARDWARE TELEMETRY]';
 
     if (q.includes('summarize') || q.includes('health') || q.includes('status')) {
-      const v = state.voltage.value.toFixed(2);
-      const i = Math.round(state.current.value);
-      const p = state.power.value.toFixed(2);
-      const d = state.distance.value.toFixed(1);
-      const l = Math.round(state.light.value);
+      const v = state.voltage.value !== null ? `${state.voltage.value.toFixed(2)} V` : '--';
+      const i = state.current.value !== null ? `${Math.round(state.current.value)} mA` : '--';
+      const p = state.power.value !== null ? `${state.power.value.toFixed(2)} W` : '--';
+      const d = state.distance.value !== null ? `${state.distance.value.toFixed(1)} cm` : '--';
+      const l = state.light.value !== null ? `${Math.round(state.light.value)} Lux` : '--';
       const anomCount = anoms.length;
 
       return {
         id: `ai_${Date.now()}`,
         role: 'assistant',
-        content: `${modeTag} AURORA-01 Mission Status Summary:\n• Flight Mode: ${state.mode}\n• System Health: ${state.healthScore}%\n• Bus Voltage: ${v} V | Current: ${i} mA | Power: ${p} W\n• Ambient Light (LDR): ${l} Lux\n• Proximity (HC-SR04): ${d} cm\n• Active Anomalies: ${anomCount === 0 ? 'None (Nominal)' : `${anomCount} active issue(s)`}\n\nAll subsystem sensors are currently within configured operating envelopes.`,
+        content: `${modeTag} AURORA-01 Mission Status Summary:\n• Flight Mode: ${state.mode}\n• System Health: ${state.healthScore}%\n• Bus Voltage: ${v} | Current: ${i} | Power: ${p}\n• Ambient Light: ${l}\n• Proximity (HC-SR04): ${d}\n• Active Anomalies: ${anomCount === 0 ? 'None (Nominal)' : `${anomCount} active issue(s)`}\n\nTelemetry status: ${state.connection}.`,
         timestamp: Date.now(),
         isSimulatedTelemetry: state.isDemoMode,
       };
@@ -172,16 +172,19 @@ export const AiMissionOfficer: React.FC = () => {
       return {
         id: `ai_${Date.now()}`,
         role: 'assistant',
-        content: `AURORA-01 Spacecraft Hardware Wiring Guide:\n• Arduino UNO I2C Bus: Connect INA219 (Addr 0x40) and MPU6050 (Addr 0x68) to SDA (Pin A4) and SCL (Pin A5) with 4.7kΩ pullup resistors.\n• HC-SR04 Ultrasonic: VCC -> 5V, GND -> GND, Trig -> Digital Pin 9, Echo -> Digital Pin 10 (use 1k/2k resistor divider for 3.3V logic if using ESP32).\n• LDR Light Sensor: In series with 10kΩ pulldown to Analog Pin A0.\n• SG90 Servo: PWM control from Digital Pin 3.\n• ESP32-S3 OV7670: Connected as an autonomous Wi-Fi subsystem to preserve UNO serial bandwidth.`,
+        content: `AURORA-01 Spacecraft Hardware Wiring Guide:\n• USB OTG Link: Connect Android Phone OTG adapter -> USB-A to USB-B cable -> Arduino UNO USB port.\n• Arduino UNO I2C Bus: INA219 (0x40) and MPU6050 (0x68) to SDA (Pin A4) and SCL (Pin A5).\n• HC-SR04 Ultrasonic: VCC -> 5V, GND -> GND, Trig -> Digital Pin 9, Echo -> Digital Pin 10.\n• LDR Light Sensors: A0 (Left), A1 (Center), A2 (Right) with 10kΩ pulldown resistors.\n• SG90 Servo: Digital Pin 3 (PWM). Power servo from external 5V rail, not phone USB port.`,
         timestamp: Date.now(),
         isSimulatedTelemetry: state.isDemoMode,
       };
     }
 
+    const vStr = state.voltage.value !== null ? `${state.voltage.value.toFixed(2)}V` : '--';
+    const iStr = state.current.value !== null ? `${Math.round(state.current.value)}mA` : '--';
+
     return {
       id: `ai_${Date.now()}`,
       role: 'assistant',
-      content: `${modeTag} I have verified the current telemetry downlink for ${state.deviceName}. Bus voltage is ${state.voltage.value.toFixed(2)}V with ${Math.round(state.current.value)}mA draw. If you are experiencing unexpected readings, check ground plane continuity between your Arduino UNO and power rails, or enter SAFE_MODE to shed load.`,
+      content: `${modeTag} Telemetry status for ${state.deviceName}: Bus voltage is ${vStr} with ${iStr} draw. Connection state: ${state.connection}. Link health: ${state.healthScore}%.`,
       timestamp: Date.now(),
       isSimulatedTelemetry: state.isDemoMode,
     };

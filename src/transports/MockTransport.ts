@@ -1,9 +1,10 @@
 /**
- * High-Fidelity Simulated Hardware Transport for AURORA-01 Demo Mode
+ * High-Fidelity Simulated Spacecraft Engine for AURORA-01 Demo Mode
+ * Outputs standard newline-delimited JSON matching the physical Arduino UNO protocol.
  */
 
 import { ITransport, TransportCallbacks, TransportStatus } from './TransportInterface';
-import { parseTelemetryLine, formatCommand } from '../utils/telemetryParser';
+import { parseTelemetryLine, validateAndFormatCommand } from '../utils/telemetryParser';
 import { MissionMode } from '../types/telemetry';
 
 export class MockTransport implements ITransport {
@@ -15,7 +16,6 @@ export class MockTransport implements ITransport {
   private timer: ReturnType<typeof setInterval> | null = null;
   private currentMode: MissionMode = 'NORMAL';
   private tickCount = 0;
-  private baseVoltage = 7.82;
   private servoAngle = 90;
 
   setCallbacks(callbacks: TransportCallbacks) {
@@ -30,10 +30,10 @@ export class MockTransport implements ITransport {
     this.updateStatus('CONNECTING');
     this.callbacks?.onLog('INFO', 'Initializing simulated orbital physics engine...');
 
-    await new Promise((r) => setTimeout(r, 600));
+    await new Promise((r) => setTimeout(r, 400));
 
     this.updateStatus('CONNECTED');
-    this.callbacks?.onLog('INFO', 'AURORA-01 Virtual Orbit locked. Downlink stream active.');
+    this.callbacks?.onLog('INFO', 'AURORA-01 Simulated Telemetry linked. Downlink active.');
 
     this.startStreaming();
     return true;
@@ -42,28 +42,54 @@ export class MockTransport implements ITransport {
   async disconnect(): Promise<void> {
     this.stopStreaming();
     this.updateStatus('DISCONNECTED');
-    this.callbacks?.onLog('INFO', 'Simulated downlink link closed.');
+    this.callbacks?.onLog('INFO', 'Simulated telemetry stopped.');
   }
 
   async sendCommand(command: string): Promise<boolean> {
     if (this.status !== 'CONNECTED') return false;
 
-    const formatted = formatCommand(command);
-    this.callbacks?.onLog('INFO', `TX -> [DEMO_CONTROLLER]: ${formatted.trim()}`);
+    const { valid, formatted, error } = validateAndFormatCommand(command);
+    if (!valid) {
+      this.callbacks?.onLog('ERROR', `Simulation rejected command: ${error}`);
+      return false;
+    }
 
-    // Simulate flight controller command ACK cycle
-    const targetMode = command.trim().toUpperCase().replace(/\s+/g, '_') as MissionMode;
+    this.callbacks?.onLog('INFO', `TX -> [SIMULATED ARDUINO]: ${formatted.trim()}`);
+
+    const trimmed = command.trim().toUpperCase();
 
     setTimeout(() => {
-      if (['NORMAL', 'POWER_SAVE', 'SAFE_MODE', 'COURSE_CHANGE', 'RESUME'].includes(targetMode)) {
-        this.currentMode = targetMode === 'RESUME' ? 'NORMAL' : targetMode;
-        this.callbacks?.onCommandAck(command, true);
-        this.callbacks?.onLog('INFO', `RX <- [DEMO_CONTROLLER]: ACK:MODE_SWITCHED_${this.currentMode}`);
-      } else {
-        this.callbacks?.onCommandAck(command, true);
-        this.callbacks?.onLog('INFO', `RX <- [DEMO_CONTROLLER]: ACK:COMMAND_EXECUTED`);
+      if (trimmed === 'PING') {
+        const ack = JSON.stringify({ type: 'pong' });
+        this.callbacks?.onPacketReceived(parseTelemetryLine(ack), ack);
+        this.callbacks?.onCommandAck('PING', true);
+        return;
       }
-    }, 350);
+
+      if (trimmed.startsWith('MODE:')) {
+        const mode = trimmed.substring(5);
+        if (mode === 'NORMAL' || mode === 'POWER_SAVE' || mode === 'SAFE' || mode === 'SAFE_MODE') {
+          this.currentMode = mode === 'SAFE' ? 'SAFE_MODE' : (mode as MissionMode);
+          const ack = JSON.stringify({ type: 'ack', command: `MODE:${mode}`, status: 'OK' });
+          this.callbacks?.onPacketReceived(parseTelemetryLine(ack), ack);
+          this.callbacks?.onCommandAck(command, true);
+          return;
+        }
+      }
+
+      if (trimmed.startsWith('SERVO:')) {
+        const angle = parseInt(trimmed.substring(6), 10);
+        if (!isNaN(angle) && angle >= 0 && angle <= 180) {
+          this.servoAngle = angle;
+          const ack = JSON.stringify({ type: 'ack', command: `SERVO:${angle}`, status: 'OK' });
+          this.callbacks?.onPacketReceived(parseTelemetryLine(ack), ack);
+          this.callbacks?.onCommandAck(command, true);
+          return;
+        }
+      }
+
+      this.callbacks?.onCommandAck(command, false);
+    }, 120);
 
     return true;
   }
@@ -72,67 +98,62 @@ export class MockTransport implements ITransport {
     return this.status === 'CONNECTED';
   }
 
-  private updateStatus(newStatus: TransportStatus, errorMsg?: string) {
+  private updateStatus(newStatus: TransportStatus, error?: string) {
     this.status = newStatus;
-    this.callbacks?.onStatusChange(newStatus, errorMsg);
+    this.callbacks?.onStatusChange(newStatus, error);
   }
 
   private startStreaming() {
     this.stopStreaming();
 
-    // Stream telemetry frame every 1000ms
     this.timer = setInterval(() => {
       this.tickCount++;
-      const t = this.tickCount;
 
-      // 1. Orbital day/night light cycle (LDR)
-      const orbitPhase = (t % 120) / 120; // 2 min demo orbit
-      const inSunlight = orbitPhase < 0.65;
-      const light = inSunlight
-        ? Math.round(1350 + Math.sin(t * 0.15) * 350 + (Math.random() - 0.5) * 50)
-        : Math.round(Math.max(10, 25 + Math.sin(t * 0.2) * 15));
+      // Math for orbital light cycle
+      const solarCycle = Math.sin(this.tickCount * 0.1);
+      const isSunlit = solarCycle > -0.2;
+      const baseLight = isSunlit ? 600 + Math.sin(this.tickCount * 0.2) * 350 : 25 + Math.random() * 20;
 
-      // 2. Ultrasonic distance (HC-SR04 cm)
-      const distance = Math.round((42.5 + Math.sin(t * 0.08) * 8 + (Math.random() - 0.5) * 1.5) * 10) / 10;
+      const ldrLeft = Math.round(Math.max(10, baseLight + Math.sin(this.tickCount * 0.3) * 45));
+      const ldrCenter = Math.round(Math.max(10, baseLight));
+      const ldrRight = Math.round(Math.max(10, baseLight - Math.sin(this.tickCount * 0.3) * 45));
 
-      // 3. Current draw based on mode (INA219 mA)
-      let baseCurrent = 410;
-      if (this.currentMode === 'POWER_SAVE') baseCurrent = 115;
-      else if (this.currentMode === 'SAFE_MODE') baseCurrent = 210;
-      else if (this.currentMode === 'COURSE_CHANGE') baseCurrent = 680;
-      const current = Math.round(baseCurrent + (Math.random() - 0.5) * 12);
+      // Ultrasonic proximity
+      const distanceCm = Math.round((35 + Math.sin(this.tickCount * 0.08) * 18 + Math.random() * 2) * 10) / 10;
+      const hazard = distanceCm < 15;
 
-      // 4. Voltage dynamics (INA219 V)
-      if (inSunlight && this.currentMode !== 'POWER_SAVE') {
-        this.baseVoltage = Math.min(8.38, this.baseVoltage + 0.001);
-      } else {
-        this.baseVoltage = Math.max(6.4, this.baseVoltage - (current > 500 ? 0.003 : 0.001));
-      }
-      const voltage = Math.round(this.baseVoltage * 100) / 100;
+      // Power calculation
+      const voltage = Math.round((7.8 - (this.tickCount * 0.0002) % 0.6) * 100) / 100;
+      const currentMA = Math.round(
+        this.currentMode === 'POWER_SAVE' ? 120 + Math.random() * 15 :
+        this.currentMode === 'SAFE_MODE' ? 65 + Math.random() * 10 :
+        390 + Math.random() * 35
+      );
 
-      // 5. 3-axis gyro attitude (MPU6050 pitch, roll, yaw)
-      const pitch = Math.round((2.8 + Math.sin(t * 0.2) * 1.5 + (Math.random() - 0.5) * 0.4) * 10) / 10;
-      const roll = Math.round((-1.2 + Math.cos(t * 0.18) * 1.2 + (Math.random() - 0.5) * 0.4) * 10) / 10;
-      const yaw = Math.round(((t * 1.2) % 360) * 10) / 10;
-      const tiltStr = `${pitch}:${roll}:${yaw}`;
+      // Attitude tilt
+      const tiltX = Math.round((Math.sin(this.tickCount * 0.12) * 4.5) * 10) / 10;
+      const tiltY = Math.round((Math.cos(this.tickCount * 0.15) * 3.8) * 10) / 10;
 
-      // 6. Solar servo angle
-      if (inSunlight) {
-        this.servoAngle = Math.round(90 + Math.sin(t * 0.05) * 45);
-      }
+      // Newline-delimited JSON telemetry matching specification
+      const telemetryObj = {
+        type: 'telemetry',
+        ldrLeft,
+        ldrCenter,
+        ldrRight,
+        distanceCm,
+        tiltX,
+        tiltY,
+        servoAngle: this.servoAngle,
+        voltage,
+        currentMA,
+        hazard,
+        mode: this.currentMode,
+      };
 
-      // 7. Alert status
-      let alert = 'NONE';
-      if (voltage < 6.6) alert = 'LOW_BUS_VOLTAGE';
-      else if (distance < 10) alert = 'PROXIMITY_ALERT';
-      else if (light < 50) alert = 'ECLIPSE_UMBRA';
-
-      // Assemble Arduino DATA format: DATA,light,distance,voltage,current,tilt,mode,alert,servo
-      const rawLine = `DATA,${light},${distance},${voltage},${current},${tiltStr},${this.currentMode},${alert},${this.servoAngle}`;
-      const packet = parseTelemetryLine(rawLine);
-
-      this.callbacks?.onPacketReceived(packet, rawLine);
-    }, 1000);
+      const jsonLine = JSON.stringify(telemetryObj);
+      const packet = parseTelemetryLine(jsonLine);
+      this.callbacks?.onPacketReceived(packet, jsonLine);
+    }, 500);
   }
 
   private stopStreaming() {

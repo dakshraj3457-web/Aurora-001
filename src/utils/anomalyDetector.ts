@@ -141,17 +141,17 @@ export function evaluateAnomalies(
     }
   }
 
-  // 7. Camera Offline
-  if (telemetry.cameraStatus.status === 'FAULT') {
+  // 7. Spacecraft Hardware Hazard Flag (Sent directly by Arduino)
+  if (telemetry.hazard) {
     anomalies.push({
-      id: `camera_fault_${now}`,
+      id: `hazard_alert_${now}`,
       timestamp: now,
-      title: 'ESP32-S3 OV7670 Camera Offline',
-      severity: 'WARNING',
-      sensor: 'ESP32-S3 Camera Subsystem',
-      readingValue: 'No HTTP response',
-      threshold: 'Ping timeout',
-      suggestedAction: 'Verify ESP32-S3 Wi-Fi connection and camera ribbon cable.',
+      title: 'Spacecraft Hardware Hazard Alert',
+      severity: 'CRITICAL',
+      sensor: 'Arduino Flight Computer',
+      readingValue: telemetry.hazardMessage || 'HAZARD_ACTIVE',
+      threshold: 'State == ACTIVE',
+      suggestedAction: 'Investigate immediate obstacle or electrical anomaly. Consider engaging SAFE_MODE.',
       origin,
       acknowledged: false,
     });

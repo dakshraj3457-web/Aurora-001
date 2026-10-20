@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Arduino UNO (ATmega16U2/8U2 USB-CDC) -->
+    <usb-device vendor-id="9025" /> <!-- 0x2341 Official Arduino -->
+    <usb-device vendor-id="10755" /> <!-- 0x2A03 Arduino LLC -->
+
+    <!-- Common Arduino UNO Clones -->
+    <usb-device vendor-id="6790" /> <!-- 0x1A86 WCH CH340 / CH341 -->
+    <usb-device vendor-id="1027" /> <!-- 0x0403 FTDI FT232R -->
+    <usb-device vendor-id="4292" /> <!-- 0x10C4 Silicon Labs CP2102 -->
+    <usb-device vendor-id="1659" /> <!-- 0x067B Prolific PL2303 -->
+
+    <!-- Generic USB CDC-ACM Communication Device Class -->
+    <usb-device class="2" />
+</resources>

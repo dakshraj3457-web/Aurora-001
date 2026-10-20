@@ -77,3 +77,57 @@ test('getModeConfig returns correct operational profile', () => {
   assert.equal(safe.payloadEnabled, false);
   assert.equal(safe.solarTracking, true);
 });
+
+import { parseTelemetryLine, validateAndFormatCommand } from './telemetryParser.ts';
+
+test('parseTelemetryLine correctly parses newline-delimited JSON telemetry', () => {
+  const jsonStr = '{"type":"telemetry","ldrLeft":420,"ldrCenter":510,"ldrRight":390,"distanceCm":32.5,"tiltX":2.4,"tiltY":-1.8,"servoAngle":90,"voltage":4.8,"currentMA":120,"hazard":false,"mode":"NORMAL"}';
+  const packet = parseTelemetryLine(jsonStr);
+
+  assert.equal(packet.isValid, true);
+  assert.equal(packet.packetType, 'telemetry');
+  assert.equal(packet.ldrLeft, 420);
+  assert.equal(packet.ldrCenter, 510);
+  assert.equal(packet.ldrRight, 390);
+  assert.equal(packet.light, 440); // average of 420, 510, 390
+  assert.equal(packet.distanceCm, 32.5);
+  assert.equal(packet.tiltX, 2.4);
+  assert.equal(packet.tiltY, -1.8);
+  assert.equal(packet.servoAngle, 90);
+  assert.equal(packet.voltage, 4.8);
+  assert.equal(packet.currentMA, 120);
+  assert.equal(packet.powerWatts, 0.58);
+  assert.equal(packet.hazard, false);
+  assert.equal(packet.mode, 'NORMAL');
+});
+
+test('parseTelemetryLine parses command ACKs and ignores malformed input safely', () => {
+  const ackLine = '{"type":"ack","command":"MODE:NORMAL","status":"OK"}';
+  const ack = parseTelemetryLine(ackLine);
+  assert.equal(ack.isValid, true);
+  assert.equal(ack.packetType, 'ack');
+  assert.equal(ack.ackCommand, 'MODE:NORMAL');
+  assert.equal(ack.ackStatus, 'OK');
+
+  const malformed = '{bad json: true}';
+  const bad = parseTelemetryLine(malformed);
+  assert.equal(bad.isValid, false);
+  assert.ok(bad.error?.includes('JSON parse error'));
+});
+
+test('validateAndFormatCommand enforces 0-180 servo limit and valid modes', () => {
+  const validServo = validateAndFormatCommand('SERVO:90');
+  assert.equal(validServo.valid, true);
+  assert.equal(validServo.formatted, 'SERVO:90\n');
+
+  const invalidServo = validateAndFormatCommand('SERVO:240');
+  assert.equal(invalidServo.valid, false);
+
+  const validMode = validateAndFormatCommand('MODE:SAFE');
+  assert.equal(validMode.valid, true);
+  assert.equal(validMode.formatted, 'MODE:SAFE\n');
+
+  const invalidMode = validateAndFormatCommand('MODE:WARP_DRIVE');
+  assert.equal(invalidMode.valid, false);
+});
+
